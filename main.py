@@ -1,17 +1,17 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session, relationship
+from sqlalchemy.orm import sessionmaker, Session, relationship, declarative_base
 from sqlalchemy.sql import func
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 
-
+# Configuration
+SECRET_KEY = "your-secret-key-here"  # Change this to a strong secret in production
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -24,7 +24,6 @@ Base = declarative_base()
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
-
 
 # DATABASE MODELS
 class User(Base):
@@ -57,7 +56,6 @@ class Todo(Base):
 
 Base.metadata.create_all(bind=engine)
 
-
 # PYDANTIC SCHEMAS (for data validation)
 class UserCreate(BaseModel):
     """Schema for creating a new user"""
@@ -65,7 +63,8 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     
-    @validator('full_name')
+    @field_validator('full_name')
+    @classmethod
     def validate_full_name(cls, v):
         if not v or not v.strip():
             raise ValueError('Full name cannot be empty')
@@ -83,13 +82,15 @@ class TodoCreate(BaseModel):
     task: str
     completed: bool = False
     
-    @validator('full_name')
+    @field_validator('full_name')
+    @classmethod
     def validate_full_name(cls, v):
         if not v or not v.strip():
             raise ValueError('Full name cannot be empty')
         return v.strip()
     
-    @validator('task')
+    @field_validator('task')
+    @classmethod
     def validate_task(cls, v):
         if not v or not v.strip():
             raise ValueError('Task cannot be empty')
@@ -170,7 +171,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise credentials_exception
     return user
 
-
 # FASTAPI APPLICATION
 app = FastAPI(
     title="Simple Todo API",
@@ -236,7 +236,6 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-
 # TODO ENDPOINTS
 @app.get("/todos", response_model=List[TodoResponse])
 def get_todos(
@@ -251,7 +250,6 @@ def get_todos(
     todos = db.query(Todo).filter(Todo.user_id == current_user.id).all()
     return todos
 
-    
 @app.post("/todos", response_model=TodoResponse, status_code=status.HTTP_201_CREATED)
 def create_todo(
     todo: TodoCreate,
@@ -329,7 +327,7 @@ def update_todo(
         )
     
     # Update only provided fields
-    update_data = todo_update.dict(exclude_unset=True)
+    update_data = todo_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(todo, field, value)
     
@@ -362,7 +360,6 @@ def delete_todo(
     db.commit()
     return None
 
-
 # ROOT ENDPOINT
 @app.get("/")
 def read_root():
@@ -394,4 +391,4 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting Todo API server...")
     print("API Documentation will be available at: http://127.0.0.1:8000/docs")
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
