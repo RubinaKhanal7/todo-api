@@ -11,23 +11,24 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 
-# ========== CONFIGURATION ==========
-SECRET_KEY = "your-secret-key-change-this-in-production"
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Database setup (SQLite for simplicity)
+# Database setup - Using SQLite 
 DATABASE_URL = "sqlite:///./todo.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Password hashing
+# Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
-# ========== DATABASE MODELS ==========
+
+# DATABASE MODELS
 class User(Base):
+    """User table to store user information"""
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -36,10 +37,11 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     todos = relationship("Todo", back_populates="owner")
 
 class Todo(Base):
+    """Todo table to store todo items"""
     __tablename__ = "todos"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -50,14 +52,15 @@ class Todo(Base):
     completed = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     owner = relationship("User", back_populates="todos")
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
-# ========== PYDANTIC SCHEMAS ==========
+
+# PYDANTIC SCHEMAS (for data validation)
 class UserCreate(BaseModel):
+    """Schema for creating a new user"""
     full_name: str
     email: EmailStr
     password: str
@@ -69,10 +72,12 @@ class UserCreate(BaseModel):
         return v.strip()
 
 class UserLogin(BaseModel):
+    """Schema for user login"""
     email: EmailStr
     password: str
 
 class TodoCreate(BaseModel):
+    """Schema for creating a new todo"""
     full_name: str
     email: EmailStr
     task: str
@@ -91,12 +96,14 @@ class TodoCreate(BaseModel):
         return v.strip()
 
 class TodoUpdate(BaseModel):
+    """Schema for updating a todo (all fields optional)"""
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     task: Optional[str] = None
     completed: Optional[bool] = None
 
 class TodoResponse(BaseModel):
+    """Schema for todo response"""
     id: int
     user_id: int
     full_name: str
@@ -110,12 +117,13 @@ class TodoResponse(BaseModel):
         from_attributes = True
 
 class Token(BaseModel):
+    """Schema for JWT token response"""
     access_token: str
     token_type: str
 
-# ========== UTILITY FUNCTIONS ==========
+# UTILITY FUNCTIONS
 def get_db():
-    """Get database session"""
+    """Get database session - this is a dependency"""
     db = SessionLocal()
     try:
         yield db
@@ -123,7 +131,7 @@ def get_db():
         db.close()
 
 def hash_password(password: str) -> str:
-    """Hash a password"""
+    """Hash a password using bcrypt"""
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -142,7 +150,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    """Get current authenticated user"""
+    """Get current authenticated user from JWT token"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -156,22 +164,33 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
+
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
     return user
 
-# ========== FASTAPI APP ==========
-app = FastAPI(title="Simple Todo API", version="1.0.0")
 
-# ========== AUTHENTICATION ENDPOINTS ==========
+# FASTAPI APPLICATION
+app = FastAPI(
+    title="Simple Todo API",
+    description="A simple todo application with JWT authentication",
+    version="1.0.0"
+)
+
+# AUTHENTICATION ENDPOINTS
 @app.post("/auth/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user"""
+    """
+    Register a new user
+    
+    - **full_name**: User's full name (required, cannot be empty)
+    - **email**: User's email address (required, must be valid email)
+    - **password**: User's password (required)
+    """
     # Check if user already exists
-    db_user = db.query(User).filter(User.email == user.email).first()
-    if db_user:
+    existing_user = db.query(User).filter(User.email == user.email).first()
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
@@ -192,42 +211,63 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/auth/login", response_model=Token)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
-    """Login user and get access token"""
-    # Find user
+    """
+    Login user and get access token
+    
+    - **email**: User's email address
+    - **password**: User's password
+    
+    Returns JWT token for authentication
+    """
+    # Find user by email
     user = db.query(User).filter(User.email == user_credentials.email).first()
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
+        data={"sub": user.email}, 
+        expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-# ========== TODO ENDPOINTS ==========
+
+# TODO ENDPOINTS
 @app.get("/todos", response_model=List[TodoResponse])
 def get_todos(
-    skip: int = 0,
-    limit: int = 10,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get all todos for current user"""
-    todos = db.query(Todo).filter(Todo.user_id == current_user.id).offset(skip).limit(limit).all()
+    """
+    Get all todos for current user
+    
+    Requires authentication (Bearer token)
+    """
+    todos = db.query(Todo).filter(Todo.user_id == current_user.id).all()
     return todos
 
+    
 @app.post("/todos", response_model=TodoResponse, status_code=status.HTTP_201_CREATED)
 def create_todo(
     todo: TodoCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Create a new todo"""
+    """
+    Create a new todo
+    
+    - **full_name**: Person's full name (required, cannot be empty)
+    - **email**: Person's email address (required, must be valid email)
+    - **task**: Todo task description (required, cannot be empty)
+    - **completed**: Whether task is completed (default: false)
+    
+    Requires authentication (Bearer token)
+    """
     new_todo = Todo(
         user_id=current_user.id,
         full_name=todo.full_name,
@@ -246,7 +286,14 @@ def get_todo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get a specific todo by ID"""
+    """
+    Get a specific todo by ID
+    
+    - **todo_id**: ID of the todo to retrieve
+    
+    Requires authentication (Bearer token)
+    Users can only access their own todos
+    """
     todo = db.query(Todo).filter(Todo.id == todo_id, Todo.user_id == current_user.id).first()
     if not todo:
         raise HTTPException(
@@ -262,7 +309,18 @@ def update_todo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update a todo"""
+    """
+    Update a todo (partial update allowed)
+    
+    - **todo_id**: ID of the todo to update
+    - **full_name**: New full name (optional)
+    - **email**: New email address (optional)
+    - **task**: New task description (optional)
+    - **completed**: New completion status (optional)
+    
+    Requires authentication (Bearer token)
+    Users can only update their own todos
+    """
     todo = db.query(Todo).filter(Todo.id == todo_id, Todo.user_id == current_user.id).first()
     if not todo:
         raise HTTPException(
@@ -285,7 +343,14 @@ def delete_todo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a todo"""
+    """
+    Delete a todo
+    
+    - **todo_id**: ID of the todo to delete
+    
+    Requires authentication (Bearer token)
+    Users can only delete their own todos
+    """
     todo = db.query(Todo).filter(Todo.id == todo_id, Todo.user_id == current_user.id).first()
     if not todo:
         raise HTTPException(
@@ -297,24 +362,36 @@ def delete_todo(
     db.commit()
     return None
 
-# ========== ROOT ENDPOINT ==========
+
+# ROOT ENDPOINT
 @app.get("/")
 def read_root():
+    """
+    Welcome message with API information
+    """
     return {
         "message": "Welcome to Simple Todo API",
+        "version": "1.0.0",
         "docs": "/docs",
+        "redoc": "/redoc",
         "endpoints": {
-            "register": "POST /auth/register",
-            "login": "POST /auth/login",
-            "get_todos": "GET /todos",
-            "create_todo": "POST /todos",
-            "get_todo": "GET /todos/{id}",
-            "update_todo": "PUT /todos/{id}",
-            "delete_todo": "DELETE /todos/{id}"
+            "auth": {
+                "register": "POST /auth/register",
+                "login": "POST /auth/login"
+            },
+            "todos": {
+                "get_todos": "GET /todos",
+                "create_todo": "POST /todos",
+                "get_todo": "GET /todos/{id}",
+                "update_todo": "PUT /todos/{id}",
+                "delete_todo": "DELETE /todos/{id}"
+            }
         }
     }
 
-# ========== RUN THE APP ==========
+# RUN THE APPLICATION
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    print("Starting Todo API server...")
+    print("API Documentation will be available at: http://127.0.0.1:8000/docs")
+    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
