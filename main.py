@@ -9,15 +9,26 @@ from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional, List
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configuration
-SECRET_KEY = "your-secret-key-here"  # Change this to a strong secret in production
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Database setup - Using SQLite 
-DATABASE_URL = "sqlite:///./todo.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# PostgreSQL Database setup
+POSTGRES_USER = os.getenv("POSTGRES_USER", "todo_user")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "todo")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -389,6 +400,7 @@ def read_root():
 # RUN THE APPLICATION
 if __name__ == "__main__":
     import uvicorn
-    print("Starting Todo API server...")
+    print("Starting Todo API server with PostgreSQL...")
+    print(f"Connecting to database at: {POSTGRES_HOST}:{POSTGRES_PORT}")
     print("API Documentation will be available at: http://127.0.0.1:8000/docs")
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
