@@ -184,9 +184,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 # FASTAPI APPLICATION
 app = FastAPI(
-    title="Simple Todo API",
-    description="A simple todo application with JWT authentication",
-    version="1.0.0"
+    title="Simple Todo API"
 )
 
 # AUTHENTICATION ENDPOINTS
@@ -251,14 +249,22 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
 @app.get("/todos", response_model=List[TodoResponse])
 def get_todos(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    page: int = 1,
+    per_page: int = 10
 ):
     """
-    Get all todos for current user
+    Get todos
     
-    Requires authentication (Bearer token)
+    - page: Page number (starts from 1)
+    - per_page: Items per page (default: 10)
     """
-    todos = db.query(Todo).filter(Todo.user_id == current_user.id).all()
+    todos = db.query(Todo)\
+             .filter(Todo.user_id == current_user.id)\
+             .offset((page - 1) * per_page)\
+             .limit(per_page)\
+             .all()
+    
     return todos
 
 @app.post("/todos", response_model=TodoResponse, status_code=status.HTTP_201_CREATED)
