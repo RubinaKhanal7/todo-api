@@ -2,7 +2,7 @@
 FROM python:3.11-slim
 
 # Set working directory
-WORKDIR /app
+WORKDIR /src
 
 # Copy requirements first and install dependencies
 COPY requirements.txt .
@@ -10,7 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the app
-COPY ./app /app
+COPY ./app /src/app
 
 # Expose port
 EXPOSE 8000

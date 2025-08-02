@@ -1,46 +1,49 @@
 
 services:
   app:
-    build: .
+    build:
+      context: .
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
+      - mongo
     volumes:
-      - "./app:/app"
-    # depends_on:
-    #   - postgres
-    #   - mongo
+      - "./app:/src/app"
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: mydb
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
+      POSTGRES_PORT: 5432
       MONGO_URI: mongodb://mongo:27017
+      SECRET_KEY: your-very-secure-secret-key-here
 
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: always
 
-  # postgres:
-  #   image: postgres:14.18
-  #   environment:
-  #     POSTGRES_DB: mydb
-  #     POSTGRES_USER: user
-  #     POSTGRES_PASSWORD: password
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   restart: always
 
-  # mongo:
-  #   image: mongo:8.0.12
-  #   ports:
-  #     - "27017:27017"
-  #   volumes:
-  #     - mongodata:/data/db
-  #   restart: always
+  postgres:
+    image: postgres:14.18
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
 
-# volumes:
-#   pgdata:
-#   mongodata:
+  mongo:
+    image: mongo:8.0.12
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    restart: always
 
+volumes:
+  pgdata:
+  mongodata:
 
 
 

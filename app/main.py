@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from database.connection import create_tables
-from api.routes import auth, todos
-from config.settings import settings
+from app.database.connection import create_tables
+from app.api.routes import auth, todos
+from app.config.settings import settings
 
 # Create tables
 create_tables()
