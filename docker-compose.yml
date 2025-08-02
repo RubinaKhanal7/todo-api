@@ -1,0 +1,51 @@
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./app:/app"
+    # depends_on:
+    #   - postgres
+    #   - mongo
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: mydb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      MONGO_URI: mongodb://mongo:27017
+
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: always
+
+  # postgres:
+  #   image: postgres:14.18
+  #   environment:
+  #     POSTGRES_DB: mydb
+  #     POSTGRES_USER: user
+  #     POSTGRES_PASSWORD: password
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: always
+
+  # mongo:
+  #   image: mongo:8.0.12
+  #   ports:
+  #     - "27017:27017"
+  #   volumes:
+  #     - mongodata:/data/db
+  #   restart: always
+
+# volumes:
+#   pgdata:
+#   mongodata:
+
+
+
+
+
+
+
+
+
