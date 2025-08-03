@@ -1,0 +1,52 @@
+from fastapi import FastAPI
+from app.database.connection import create_tables
+from app.api.routes import auth, todos
+from app.config.settings import settings
+
+# Create tables
+try:
+    create_tables()
+except Exception as e:
+    print(f"Failed to create tables: {e}")
+
+# FastAPI application
+app = FastAPI(
+    title="Simple Todo API"
+)
+
+# Include routers
+app.include_router(auth.router)
+app.include_router(todos.router)
+
+@app.get("/")
+def read_root():
+    """
+    Welcome message with API information
+    """
+    return {
+        "message": "Welcome to Simple Todo API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "endpoints": {
+            "auth": {
+                "register": "POST /auth/register",
+                "login": "POST /auth/login"
+            },
+            "todos": {
+                "get_todos": "GET /todos",
+                "create_todo": "POST /todos",
+                "get_todo": "GET /todos/{id}",
+                "update_todo": "PUT /todos/{id}",
+                "delete_todo": "DELETE /todos/{id}"
+            }
+        }
+    }
+
+# Run the application
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting Todo API server with PostgreSQL...")
+    print(f"Connecting to database at: {settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}")
+    print("API Documentation will be available at: http://127.0.0.1:8000/docs")
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
