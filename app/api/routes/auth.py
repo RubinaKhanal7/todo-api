@@ -7,7 +7,7 @@ from app.schemas.user import UserCreate, UserLogin
 from app.schemas.token import Token
 from app.auth.utils import hash_password, verify_password, create_access_token
 from app.config.settings import settings
-from app.auth.dependencies import get_current_user  # Make sure this is imported
+from app.auth.dependencies import get_current_user 
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -38,7 +38,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         full_name=user.full_name,
         email=user.email,
         hashed_password=hashed_password,
-        user_status=True  # Explicitly set to True
+        user_status=True 
     )
     db.add(new_user)
     db.commit()
@@ -47,7 +47,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return {
         "message": "User created successfully", 
         "user_id": new_user.id,
-        "user_status": new_user.user_status  # Include status in response
+        "user_status": new_user.user_status 
     }
 
 @router.post("/login", response_model=Token)
@@ -60,10 +60,8 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     
     Returns JWT token for authentication
     """
-    # Find user by email
     user = db.query(User).filter(User.email == user_credentials.email).first()
     
-    # Check if user exists and password matches
     if not user or not verify_password(user_credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -71,7 +69,6 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check if user is active
     if not user.user_status:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -92,7 +89,7 @@ def update_user_status(
     user_id: int,
     status_update: UserStatusUpdate = Body(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # Requires admin privileges
+    current_user: User = Depends(get_current_user)  
 ):
     """
     Update user active status
