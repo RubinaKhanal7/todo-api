@@ -4,7 +4,10 @@ from app.api.routes import auth, todos
 from app.config.settings import settings
 
 # Create tables
-create_tables()
+try:
+    create_tables()
+except Exception as e:
+    print(f"Failed to create tables: {e}")
 
 # FastAPI application
 app = FastAPI(

@@ -1,0 +1,10 @@
+__pycache__
+venv/
+.env
+*/.env
+*/docker-compose.yml
+tests
+docker-compose.yml
+alembic
+Dockerfile
+assets/
