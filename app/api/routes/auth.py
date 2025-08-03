@@ -24,15 +24,13 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     - **email**: User's email address (required, must be valid email)
     - **password**: User's password (required)
     """
-    # Check if user already exists
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
-    
-    # Create new user with default active status
+
     hashed_password = hash_password(user.password)
     new_user = User(
         full_name=user.full_name,
