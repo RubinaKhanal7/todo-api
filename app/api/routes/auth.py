@@ -7,7 +7,8 @@ from app.schemas.user import UserCreate, UserLogin
 from app.schemas.token import Token
 from app.auth.utils import hash_password, verify_password, create_access_token
 from app.config.settings import settings
-from app.auth.dependencies import get_current_user 
+from app.auth.dependencies import get_current_user, is_admin 
+from app.config.helpers import get_user_or_404 
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -40,12 +41,13 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     )
     db.add(new_user)
     db.commit()
-    db.refresh(new_user)
+    db.refresh(new_user) 
     
     return {
         "message": "User created successfully", 
         "user_id": new_user.id,
-        "user_status": new_user.user_status 
+        "user_status": new_user.user_status,
+        "created_at": new_user.created_at 
     }
 
 @router.post("/login", response_model=Token)
@@ -87,29 +89,80 @@ def update_user_status(
     user_id: int,
     status_update: UserStatusUpdate = Body(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  
+    current_user: User = Depends(get_current_user),
+    admin_check: bool = Depends(is_admin)  
 ):
     """
-    Update user active status
+    Update user active status (Admin only)
     
     - **user_id**: ID of user to update
     - **status**: boolean (true=active, false=inactive)
     """
-    # Find target user
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Update status
+    user = get_user_or_404(db, user_id)
+
     user.user_status = status_update.status
     db.commit()
-    db.refresh(user)
+    db.refresh(user) 
     
     return {
         "message": "User status updated successfully",
         "user_id": user.id,
-        "new_status": "active" if user.user_status else "inactive"
+        "new_status": "active" if user.user_status else "inactive",
+        "updated_at": user.updated_at  
+    }
+
+@router.get("/users/{user_id}", status_code=status.HTTP_200_OK)
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    admin_check: bool = Depends(is_admin)
+):
+    """
+    Get user details (Admin only)
+    
+    - **user_id**: ID of user to retrieve
+    """
+    user = get_user_or_404(db, user_id)
+    
+    return {
+        "user_id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "user_status": user.user_status,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at
+    }
+
+@router.get("/users", status_code=status.HTTP_200_OK)
+def get_all_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    admin_check: bool = Depends(is_admin),
+    page: int = 1,
+    per_page: int = 10
+):
+    """
+    Get all users with pagination (Admin only)
+    
+    - **page**: Page number (starts from 1)
+    - **per_page**: Items per page (default: 10)
+    """
+    users = db.query(User).offset((page - 1) * per_page).limit(per_page).all()
+    
+    return {
+        "users": [
+            {
+                "user_id": user.id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "user_status": user.user_status,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at
+            }
+            for user in users
+        ],
+        "page": page,
+        "per_page": per_page,
+        "total": len(users)
     }
