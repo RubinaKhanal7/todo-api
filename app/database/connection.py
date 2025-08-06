@@ -4,11 +4,10 @@ from app.config.settings import settings
 import time
 import logging
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Enable echo=True for debugging SQL queries
+
 engine = create_engine(
     settings.database_url,
     echo=True,
