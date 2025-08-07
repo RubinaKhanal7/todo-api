@@ -28,3 +28,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     if user is None:
         raise credentials_exception
     return user
+
+def is_admin(current_user: User = Depends(get_current_user)):
+    """Check if user is admin"""
+    if current_user.email not in settings.ADMIN_EMAILS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return True

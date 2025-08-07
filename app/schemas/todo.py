@@ -4,17 +4,8 @@ from datetime import datetime
 
 class TodoCreate(BaseModel):
     """Schema for creating a new todo"""
-    full_name: str
-    email: EmailStr
     task: str
     completed: bool = False
-    
-    @field_validator('full_name')
-    @classmethod
-    def validate_full_name(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Full name cannot be empty')
-        return v.strip()
     
     @field_validator('task')
     @classmethod
@@ -24,11 +15,18 @@ class TodoCreate(BaseModel):
         return v.strip()
 
 class TodoUpdate(BaseModel):
-    """Schema for updating a todo (all fields optional)"""
-    full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
+    """Schema for updating a todo"""
     task: Optional[str] = None
     completed: Optional[bool] = None
+    
+    @field_validator('task')
+    @classmethod
+    def validate_task(cls, v):
+        if v is not None: 
+            if not v.strip():
+                raise ValueError('Task cannot be empty')
+            return v.strip()
+        return v
 
 class TodoResponse(BaseModel):
     """Schema for todo response"""
