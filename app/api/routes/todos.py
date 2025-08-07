@@ -91,9 +91,7 @@ def update_todo(
     """
     Update a todo (partial update allowed)
     - **todo_id**: ID of the todo to update
-    - **full_name**: New full name (optional)
-    - **email**: New email address (optional)
-    - **task**: New task description (optional)
+    - **task**: New task description 
     - **completed**: New completion status (optional)
     """
     todo = db.query(Todo).filter(Todo.id == todo_id).first()
