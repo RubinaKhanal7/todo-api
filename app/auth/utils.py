@@ -3,6 +3,7 @@ from jose import jwt
 from datetime import datetime, timedelta
 from typing import Optional
 from app.config.settings import settings
+import secrets
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -24,3 +25,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+def generate_verification_token() -> str:
+    """Generate a random verification token"""
+    return secrets.token_urlsafe(32)
