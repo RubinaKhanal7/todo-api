@@ -24,24 +24,35 @@ def read_root():
     Welcome message with API information
     """
     return {
-        "message": "Welcome to Simple Todo API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "redoc": "/redoc",
-        "endpoints": {
-            "auth": {
-                "register": "POST /auth/register",
-                "login": "POST /auth/login"
+            "message": "Welcome to Simple Todo API",
+            "version": "1.1.0",
+            "features": ["User Authentication", "Password Validation", "Todo Management"],
+            "password_requirements": {
+                "minimum_length": 8,
+                "must_contain": [
+                    "At least one uppercase letter (A-Z)",
+                    "At least one lowercase letter (a-z)", 
+                    "At least one digit (0-9)",
+                    "At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+                ]
             },
-            "todos": {
-                "get_todos": "GET /todos",
-                "create_todo": "POST /todos",
-                "get_todo": "GET /todos/{id}",
-                "update_todo": "PUT /todos/{id}",
-                "delete_todo": "DELETE /todos/{id}"
+            "docs": "/docs",
+            "redoc": "/redoc",
+            "endpoints": {
+                "auth": {
+                    "register": "POST /auth/register",
+                    "login": "POST /auth/login",
+                    "validate_password": "POST /auth/validate-password"
+                },
+                "todos": {
+                    "get_todos": "GET /todos",
+                    "create_todo": "POST /todos",
+                    "get_todo": "GET /todos/{id}",
+                    "update_todo": "PUT /todos/{id}",
+                    "delete_todo": "DELETE /todos/{id}"
+                }
             }
         }
-    }
 
 # Run the application
 if __name__ == "__main__":

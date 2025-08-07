@@ -8,7 +8,7 @@ from app.schemas.token import Token
 from app.auth.utils import hash_password, verify_password, create_access_token
 from app.config.settings import settings
 from app.auth.dependencies import get_current_user 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -18,35 +18,62 @@ class UserStatusUpdate(BaseModel):
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """
-    Register a new user
+    Register a new user with password validation
+    
+    Password Requirements:
+    - At least 8 characters long
+    - Contains at least one uppercase letter (A-Z)
+    - Contains at least one lowercase letter (a-z)
+    - Contains at least one digit (0-9)
+    - Contains at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)
     
     - **full_name**: User's full name (required, cannot be empty)
     - **email**: User's email address (required, must be valid email)
-    - **password**: User's password (required)
+    - **password**: User's password (required, must meet security requirements)
     """
-    existing_user = db.query(User).filter(User.email == user.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+    try:
+        existing_user = db.query(User).filter(User.email == user.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
 
-    hashed_password = hash_password(user.password)
-    new_user = User(
-        full_name=user.full_name,
-        email=user.email,
-        hashed_password=hashed_password,
-        user_status=True 
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+        hashed_password = hash_password(user.password)
+        
+        # Create new user
+        new_user = User(
+            full_name=user.full_name,
+            email=user.email,
+            hashed_password=hashed_password,
+            user_status=True 
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return {
+            "message": "User created successfully", 
+            "user_id": new_user.id,
+            "user_status": new_user.user_status,
+            "password_requirements": "All password requirements satisfied"
+        }
     
-    return {
-        "message": "User created successfully", 
-        "user_id": new_user.id,
-        "user_status": new_user.user_status 
-    }
+    except ValidationError as e:
+        error_details = []
+        for error in e.errors():
+            if error['type'] == 'value_error':
+                error_details.append(error['msg'])
+            else:
+                error_details.append(f"{error['loc'][0]}: {error['msg']}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Validation failed",
+                "errors": error_details
+            }
+        )
 
 @router.post("/login", response_model=Token)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
@@ -73,8 +100,7 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Account is deactivated. Please contact support.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Create access token
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, 
@@ -95,15 +121,13 @@ def update_user_status(
     - **user_id**: ID of user to update
     - **status**: boolean (true=active, false=inactive)
     """
-    # Find target user
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
-    # Update status
+
     user.user_status = status_update.status
     db.commit()
     db.refresh(user)
