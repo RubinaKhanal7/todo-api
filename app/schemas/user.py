@@ -1,6 +1,9 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from app.config.validators import validate_password
+from app.models.user import UserStatus
 from fastapi import HTTPException, status
+from typing import Optional
+from datetime import datetime
 
 class UserCreate(BaseModel):
     """Schema for creating a new user"""
@@ -28,3 +31,35 @@ class UserLogin(BaseModel):
     """Schema for user login"""
     email: EmailStr
     password: str
+
+class UserStatusUpdate(BaseModel):
+    """Schema for updating user status"""
+    status: UserStatus
+
+class UserResponse(BaseModel):
+    """Schema for user response"""
+    id: int
+    full_name: str
+    email: str
+    status: UserStatus
+    email_verified: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class EmailVerificationRequest(BaseModel):
+    """Schema for email verification request"""
+    token: str
+
+class EmailVerificationToken(BaseModel):
+    """Schema for email verification token in URL path"""
+    token: str
+
+    @field_validator('token')
+    @classmethod
+    def validate_token(cls, v):
+        if not v or len(v) < 32:
+            raise ValueError('Invalid verification token format')
+        return v

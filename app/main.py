@@ -1,13 +1,22 @@
 from fastapi import FastAPI
 from app.database.connection import create_tables
-from app.api.routes import auth, todos
+from app.api.routes import auth, todos, admin  
 from app.config.settings import settings
+from app.config.scheduler import start_scheduler
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 # Create tables
 try:
     create_tables()
 except Exception as e:
     print(f"Failed to create tables: {e}")
+
+# Start scheduler
+try:
+    start_scheduler()
+except Exception as e:
+    print(f"Failed to start scheduler: {e}")
 
 # FastAPI application
 app = FastAPI(
@@ -17,6 +26,7 @@ app = FastAPI(
 # Include routers
 app.include_router(auth.router)
 app.include_router(todos.router)
+app.include_router(admin.router) 
 
 @app.get("/")
 def read_root():
@@ -53,6 +63,14 @@ def read_root():
                 }
             }
         }
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Clean up scheduler on shutdown"""
+    scheduler = BackgroundScheduler.get_instance()
+    if scheduler.running:
+        scheduler.shutdown()
+        print("Scheduler shut down successfully")
 
 # Run the application
 if __name__ == "__main__":
