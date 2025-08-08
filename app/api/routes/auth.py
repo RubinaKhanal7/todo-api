@@ -11,9 +11,9 @@ from app.schemas.user import (
     EmailVerificationRequest
 )
 from app.schemas.token import Token
-from app.auth.utils import hash_password, verify_password, create_access_token
+from app.auth.utils import hash_password, verify_password, create_access_token,create_refresh_token
 from app.config.settings import settings
-from app.auth.dependencies import get_current_user, is_admin 
+from app.auth.dependencies import get_current_user, is_admin, get_refresh_token_user 
 from app.config.helpers import get_user_or_404  
 from app.config.email import email_service
 from pydantic import BaseModel, ValidationError, EmailStr
@@ -229,6 +229,36 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
                 detail="Multiple pending accounts found. Please contact support or try registering again."
             )
 
+@router.post("/refresh", response_model=Token)
+def refresh_access_token(
+    current_user: User = Depends(get_refresh_token_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Refresh access token using refresh token
+    
+    - Requires valid refresh token in Authorization header
+    - Returns new access token and refresh token
+    - Both tokens will have new expiration times
+    """
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
+    
+    access_token = create_access_token(
+        data={"sub": current_user.email},
+        expires_delta=access_token_expires
+    )
+    refresh_token = create_refresh_token(
+        data={"sub": current_user.email},
+        expires_delta=refresh_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
+
 @router.post("/login", response_model=Token)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_credentials.email).first()
@@ -263,11 +293,22 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
+    
     access_token = create_access_token(
-        data={"sub": user.email}, 
+        data={"sub": user.email},
         expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = create_refresh_token(
+        data={"sub": user.email},
+        expires_delta=refresh_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
 
 
 
@@ -411,3 +452,4 @@ def get_profile(current_user: User = Depends(get_current_user)):
     Get current user's profile
     """
     return current_user
+
