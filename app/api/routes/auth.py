@@ -145,38 +145,33 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
     Resend verification email - user provides any email address
     
     This endpoint allows users to:
-    1. Provide their current registered email to resend verification
-    2. Provide a new email to change their email address and send verification
-    
-    The system will automatically detect if this is:
-    - An existing registered email (resend to same email)
-    - A new email (find pending account and update email address)
+    1. Resend verification to their existing email (verified or not)
+    2. Change to a new email and receive verification (status remains pending)
     
     Parameters:
     - email: Either their current registered email or a new email address
     """
     target_email = request.email
+
+    existing_user_with_target_email = db.query(User).filter(User.email == target_email).first()
     
-    existing_user = db.query(User).filter(User.email == target_email).first()
-    
-    if existing_user:
-        if existing_user.status != UserStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This email is already verified or account is not in pending status"
-            )
-        
+    if existing_user_with_target_email:
         verification_token = email_service.generate_verification_token()
         verification_expiry = email_service.get_verification_expiry()
         
-        existing_user.email_verification_token = verification_token
-        existing_user.email_verification_expires = verification_expiry
+        existing_user_with_target_email.email_verification_token = verification_token
+        existing_user_with_target_email.email_verification_expires = verification_expiry
+
+        if existing_user_with_target_email.status != UserStatus.PENDING:
+            existing_user_with_target_email.status = UserStatus.ACTIVE
+            existing_user_with_target_email.email_verified = True
+            existing_user_with_target_email.user_status = True
         
         db.commit()
         
         email_sent = email_service.send_verification_email(
             target_email,
-            existing_user.full_name,
+            existing_user_with_target_email.full_name,
             verification_token
         )
         
@@ -184,9 +179,9 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
             "message": "Verification email sent successfully",
             "email_sent": email_sent,
             "target_email": target_email,
-            "email_changed": False
+            "email_changed": False,
+            "was_already_verified": existing_user_with_target_email.email_verified
         }
-    
     else:
         pending_users = db.query(User).filter(User.status == UserStatus.PENDING).all()
         
@@ -197,15 +192,19 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
             )
 
         if len(pending_users) == 1:
+
             user = pending_users[0]
+
+            email_changed = user.email.lower() != target_email.lower()
             
             user.email = target_email
-
             verification_token = email_service.generate_verification_token()
             verification_expiry = email_service.get_verification_expiry()
             
             user.email_verification_token = verification_token
             user.email_verification_expires = verification_expiry
+            user.status = UserStatus.PENDING  
+            user.email_verified = False
             
             db.commit()
             db.refresh(user)
@@ -217,10 +216,11 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
             )
             
             return {
-                "message": f"Email address updated and verification sent to {target_email}",
+                "message": f"Verification email sent to {target_email}",
                 "email_sent": email_sent,
                 "target_email": target_email,
-                "email_changed": True
+                "email_changed": email_changed,
+                "status": "pending"  
             }
         
         else:
