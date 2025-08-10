@@ -6,6 +6,7 @@ from app.models.user import User
 from app.models.todo import Todo
 from app.schemas.todo import TodoCreate, TodoUpdate, TodoResponse
 from app.auth.dependencies import get_current_user, is_admin
+from datetime import datetime
 
 router = APIRouter(prefix="/todos", tags=["Todos"])
 
@@ -14,18 +15,25 @@ def get_todos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     page: int = 1,
-    per_page: int = 10
+    per_page: int = 10,
+    include_deleted: bool = False
 ):
     """
     Get todos
     - page: Page number (starts from 1)
     - per_page: Items per page (default: 10)
+    - include_deleted: Include deleted todos (admin only, default: false)
     """
     try:
         admin_check = is_admin(current_user)
         query = db.query(Todo)
+        if not include_deleted:
+            query = query.filter(Todo.is_deleted == False)
     except HTTPException:
-        query = db.query(Todo).filter(Todo.user_id == current_user.id)
+        query = db.query(Todo).filter(
+            Todo.user_id == current_user.id,
+            Todo.is_deleted == False
+        )
     
     todos = query.offset((page - 1) * per_page).limit(per_page).all()
     return todos
@@ -63,7 +71,14 @@ def get_todo(
     Get a specific todo by ID
     - **todo_id**: ID of the todo to retrieve
     """
-    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    query = db.query(Todo).filter(Todo.id == todo_id)
+    
+    try:
+        is_admin(current_user)
+    except HTTPException:
+        query = query.filter(Todo.is_deleted == False)
+    
+    todo = query.first()
     if not todo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -94,7 +109,14 @@ def update_todo(
     - **task**: New task description 
     - **completed**: New completion status (optional)
     """
-    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    query = db.query(Todo).filter(Todo.id == todo_id)
+    
+    try:
+        is_admin(current_user)
+    except HTTPException:
+        query = query.filter(Todo.is_deleted == False)
+    
+    todo = query.first()
     if not todo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -103,7 +125,6 @@ def update_todo(
     
     try:
         is_admin(current_user)
-
     except HTTPException:
         if todo.user_id != current_user.id:
             raise HTTPException(
@@ -126,11 +147,18 @@ def delete_todo(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Delete a todo
+    Delete a todo (soft delete)
     
     - **todo_id**: ID of the todo to delete
     """
-    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    query = db.query(Todo).filter(Todo.id == todo_id)
+    
+    try:
+        is_admin(current_user)
+    except HTTPException:
+        query = query.filter(Todo.is_deleted == False)
+    
+    todo = query.first()
     if not todo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -145,7 +173,32 @@ def delete_todo(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to delete this todo"
             )
-    
-    db.delete(todo)
+
+    todo.soft_delete()
     db.commit()
     return None
+
+
+@router.post("/{todo_id}/restore", response_model=TodoResponse)
+def restore_todo(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    is_admin(current_user) 
+    
+    todo = db.query(Todo).filter(
+        Todo.id == todo_id,
+        Todo.is_deleted == True
+    ).first()
+    
+    if not todo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deleted todo not found"
+        )
+    
+    todo.restore()
+    db.commit()
+    db.refresh(todo)
+    return todo

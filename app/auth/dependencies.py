@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -36,6 +36,12 @@ def get_current_user(
     user = db.query(User).filter(User.email == email).first()
     if user is None:
         raise credentials_exception
+    
+    if user.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account has been deleted. Contact support to restore."
+        )
 
     if user.status in [UserStatus.SUSPENDED, UserStatus.BANNED, UserStatus.DELETED]:
         raise HTTPException(
@@ -66,9 +72,44 @@ def is_admin(current_user: User = Depends(get_current_user)):
         )
     return True
 
+def get_refresh_token_user_from_cookie(
+    refresh_token: str,
+    db: Session
+):
+    """Get user from refresh token cookie"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = verify_token(refresh_token, "refresh")
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise credentials_exception
+
+    if user.status in [UserStatus.SUSPENDED, UserStatus.BANNED, UserStatus.DELETED]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Account is {user.status.value.lower()}. Access denied."
+        )
+    
+    return user
+
 def get_refresh_token_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ):
-    """Get user from refresh token"""
+    """Get user from refresh token (legacy method for backward compatibility)"""
     return get_current_user(credentials, db, "refresh")

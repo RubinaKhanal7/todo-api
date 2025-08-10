@@ -5,6 +5,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from app.config.settings import settings
 import logging
+from fastapi import BackgroundTasks
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,16 @@ class EmailService:
         """Get verification token expiry time"""
         return datetime.utcnow() + timedelta(hours=settings.EMAIL_VERIFICATION_EXPIRE_HOURS)
 
-    def send_verification_email(self, to_email: str, full_name: str, verification_token: str) -> bool:
-        """Send email verification email with clickable link that redirects to docs"""
+    def send_verification_email(self, background_tasks: BackgroundTasks, to_email: str, full_name: str, verification_token: str) -> bool:
+        background_tasks.add_task(
+            self._send_verification_email,
+            to_email=to_email,
+            full_name=full_name,
+            verification_token=verification_token
+        )
+        return True
+
+    def _send_verification_email(self, to_email: str, full_name: str, verification_token: str):
         try:
             verification_url = f"http://localhost:8000/auth/verify-email/{verification_token}?redirect=/docs"
             
@@ -46,7 +55,6 @@ class EmailService:
             msg['To'] = to_email
             msg['Subject'] = "Verify Your Email - Todo App"
 
-            # Attach HTML version
             msg.attach(MIMEText(html, 'html'))
 
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
@@ -56,13 +64,19 @@ class EmailService:
                 server.sendmail(self.from_email, to_email, msg.as_string())
             
             logger.info(f"Verification email sent to {to_email}")
-            return True
         except Exception as e:
             logger.error(f"Error sending verification email: {str(e)}")
-            return False
 
-    def send_status_change_email(self, to_email: str, full_name: str, new_status: str) -> bool:
-        """Send email when user status changes"""
+    def send_status_change_email(self, background_tasks: BackgroundTasks, to_email: str, full_name: str, new_status: str) -> bool:
+        background_tasks.add_task(
+            self._send_status_change_email,
+            to_email=to_email,
+            full_name=full_name,
+            new_status=new_status
+        )
+        return True
+
+    def _send_status_change_email(self, to_email: str, full_name: str, new_status: str):
         try:
             msg = MIMEMultipart('alternative')
             msg['From'] = self.from_email
@@ -78,7 +92,6 @@ class EmailService:
 
             message = status_messages.get(new_status, f"Your account status has been changed to {new_status}.")
 
-            # Create both plain and HTML versions
             text = f"""\
             Hi {full_name},
             
@@ -90,37 +103,19 @@ class EmailService:
             Todo App Team
             """
 
-            html = f"""\
-            <html>
-              <body>
-                <p>Hi {full_name},</p>
-                <p>{message}</p>
-                <p>If you have any questions, please contact our support team.</p>
-                <p>Best regards,<br>Todo App Team</p>
-              </body>
-            </html>
-            """
 
-            # Attach both versions
-            part1 = MIMEText(text, 'plain')
-            part2 = MIMEText(html, 'html')
-            msg.attach(part1)
-            msg.attach(part2)
+            part = MIMEText(text, 'plain')
+            msg.attach(part)
 
-            # Send the email
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 server.starttls()
                 server.login(self.username, self.password)
                 server.sendmail(self.from_email, to_email, msg.as_string())
             
             logger.info(f"Status change email sent to {to_email}")
-            return True
-
         except smtplib.SMTPException as e:
             logger.error(f"Failed to send status change email: {str(e)}")
-            return False
         except Exception as e:
             logger.error(f"Unexpected error sending status email: {str(e)}")
-            return False
 
 email_service = EmailService()

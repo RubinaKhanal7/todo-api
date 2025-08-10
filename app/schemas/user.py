@@ -32,6 +32,29 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class UserUpdate(BaseModel):
+    """Schema for updating user information"""
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v):
+        if v is not None and not v.strip():
+            raise ValueError('Full name cannot be empty')
+        return v.strip() if v else None
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        if v is not None:
+            is_valid, errors = validate_password(v)
+            if not is_valid:
+                error_message = "Password validation failed: " + ", ".join(errors)
+                raise ValueError(error_message)
+        return v
+
 class UserStatusUpdate(BaseModel):
     """Schema for updating user status"""
     status: UserStatus

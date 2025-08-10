@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from app.database.connection import get_db
@@ -8,17 +9,19 @@ from app.schemas.user import (
     UserLogin, 
     UserStatusUpdate, 
     UserResponse, 
-    EmailVerificationRequest
+    EmailVerificationRequest,
+    UserUpdate
 )
-from app.schemas.token import Token
-from app.auth.utils import hash_password, verify_password, create_access_token,create_refresh_token
+from app.schemas.token import AccessTokenResponse 
+from app.auth.utils import hash_password, verify_password, create_access_token, create_refresh_token
 from app.config.settings import settings
-from app.auth.dependencies import get_current_user, is_admin, get_refresh_token_user 
+from app.auth.dependencies import get_current_user, is_admin, get_refresh_token_user_from_cookie
 from app.config.helpers import get_user_or_404  
 from app.config.email import email_service
 from pydantic import BaseModel, ValidationError, EmailStr
 from typing import List
 from fastapi.responses import RedirectResponse
+from fastapi import BackgroundTasks
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -26,8 +29,31 @@ class ResendVerificationRequest(BaseModel):
     """Schema for resending verification email"""
     email: EmailStr  
 
+def set_refresh_token_cookie(response: Response, refresh_token: str):
+    """Set refresh token as HTTP-only cookie"""
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60,  
+        httponly=True,
+        secure=settings.COOKIE_SECURE,  
+        samesite="lax",
+        path="/auth/refresh" 
+    )
+
+def clear_refresh_token_cookie(response: Response):
+    """Clear refresh token cookie"""
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        path="/auth/refresh"
+    )
+
 @router.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, background_tasks: BackgroundTasks,db: Session = Depends(get_db)
+):
     try:
         existing_user = db.query(User).filter(User.email == user.email).first()
         if existing_user:
@@ -37,7 +63,6 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             )
 
         hashed_password = hash_password(user.password)
-
         is_admin_user = user.email in settings.ADMIN_EMAILS
         
         if is_admin_user:
@@ -51,7 +76,6 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
                 email_verification_token=None,
                 email_verification_expires=None
             )
-            email_sent = False
             verification_required = False
         else:
             verification_token = email_service.generate_verification_token()
@@ -65,7 +89,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
                 email_verification_token=verification_token,
                 email_verification_expires=verification_expiry
             )
-            email_sent = email_service.send_verification_email(
+            email_service.send_verification_email(
+                background_tasks,
                 user.email, 
                 user.full_name, 
                 verification_token
@@ -79,8 +104,8 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         return {
             "message": "User registered successfully." + (" Please check your email to verify your account." if verification_required else ""),
             "user_id": new_user.id,
-            "status": new_user.status,
-            "email_sent": email_sent,
+           "status": new_user.status.value,
+            "email_queued": verification_required, 
             "verification_required": verification_required
         }
     
@@ -140,7 +165,8 @@ def verify_email_via_link(
     }
 
 @router.post("/resend-verification", response_model=dict)
-def resend_verification(request: ResendVerificationRequest, db: Session = Depends(get_db)):
+def resend_verification(request: ResendVerificationRequest, background_tasks: BackgroundTasks,db: Session = Depends(get_db)
+):
     """
     Resend verification email - user provides any email address
     
@@ -169,7 +195,8 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
         
         db.commit()
         
-        email_sent = email_service.send_verification_email(
+        email_service.send_verification_email(
+            background_tasks,
             target_email,
             existing_user_with_target_email.full_name,
             verification_token
@@ -177,10 +204,10 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
         
         return {
             "message": "Verification email sent successfully",
-            "email_sent": email_sent,
             "target_email": target_email,
             "email_changed": False,
-            "was_already_verified": existing_user_with_target_email.email_verified
+            "was_already_verified": existing_user_with_target_email.email_verified,
+            "status": existing_user_with_target_email.status.value
         }
     else:
         pending_users = db.query(User).filter(User.status == UserStatus.PENDING).all()
@@ -192,7 +219,6 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
             )
 
         if len(pending_users) == 1:
-
             user = pending_users[0]
 
             email_changed = user.email.lower() != target_email.lower()
@@ -229,37 +255,53 @@ def resend_verification(request: ResendVerificationRequest, db: Session = Depend
                 detail="Multiple pending accounts found. Please contact support or try registering again."
             )
 
-@router.post("/refresh", response_model=Token)
+@router.post("/refresh", response_model=AccessTokenResponse)
 def refresh_access_token(
-    current_user: User = Depends(get_refresh_token_user),
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
-    Refresh access token using refresh token
+    Refresh access token using refresh token from HTTP-only cookie
     
-    - Requires valid refresh token in Authorization header
-    - Returns new access token and refresh token
-    - Both tokens will have new expiration times
+    - Requires valid refresh token in HTTP-only cookie
+    - Returns new access token only
+    - Refresh token remains in HTTP-only cookie with updated expiration
     """
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
+    refresh_token = request.cookies.get("refresh_token")
     
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    current_user = get_refresh_token_user_from_cookie(refresh_token, db)
+    
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": current_user.email},
         expires_delta=access_token_expires
     )
-    refresh_token = create_refresh_token(
+    
+    refresh_token_expires = timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES)
+    new_refresh_token = create_refresh_token(
         data={"sub": current_user.email},
         expires_delta=refresh_token_expires
     )
     
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    response = JSONResponse(
+        content={
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    )
 
-@router.post("/login", response_model=Token)
+    set_refresh_token_cookie(response, new_refresh_token)
+    
+    return response
+
+@router.post("/login", response_model=AccessTokenResponse)
 def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == user_credentials.email).first()
     
@@ -304,95 +346,76 @@ def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
         expires_delta=refresh_token_expires
     )
     
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
-    }
+    response = JSONResponse(
+        content={
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    )
 
+    set_refresh_token_cookie(response, refresh_token)
+    
+    return response
 
+@router.post("/logout")
+def logout():
+    """
+    Logout user by clearing refresh token cookie
+    """
+    response = JSONResponse(
+        content={"message": "Successfully logged out"}
+    )
+
+    clear_refresh_token_cookie(response)
+    
+    return response
 
 @router.patch("/users/{user_id}/status", response_model=dict)
 def update_user_status(
     user_id: int,
     status_update: UserStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     admin_check: bool = Depends(is_admin)
 ):
-    """
-    Update user status
-    
-    Available statuses:
-    - PENDING: User registered but email not verified
-    - ACTIVE: User active and can use the system
-    - INACTIVE: User deactivated their account
-    - SUSPENDED: Admin suspended the user
-    - BANNED: User permanently banned
-    - DELETED: Admin marked for deletion
-    """
     user = get_user_or_404(db, user_id)
     old_status = user.status
     
-    user.status = status_update.status
+    try:
+        new_status = UserStatus[status_update.status.upper()]
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid status. Valid values: {', '.join([e.value for e in UserStatus])}"
+        )
 
-    if status_update.status == UserStatus.ACTIVE:
-        user.user_status = True
+    if new_status == UserStatus.DELETED:
+        user.soft_delete() 
     else:
-        user.user_status = False
-    
+        user.status = new_status
+        user.user_status = (new_status == UserStatus.ACTIVE)
+        if old_status == UserStatus.DELETED:
+            user.deleted_at = None
+
     db.commit()
-    db.refresh(user)
     
-    if old_status != status_update.status:
+    if old_status != new_status:
         email_service.send_status_change_email(
+            background_tasks, 
             user.email,
             user.full_name,
-            status_update.status.value
+            new_status.value
         )
     
     return {
         "message": "User status updated successfully",
         "user_id": user.id,
-        "old_status": old_status,
-        "new_status": user.status,
-        "updated_at": user.updated_at
+        "old_status": old_status.value,
+        "new_status": new_status.value,
+        "deleted_at": user.deleted_at
     }
 
-@router.patch("/users/{user_id}/deactivate", response_model=dict)
-def deactivate_account(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Deactivate user's own account (User can deactivate their own account)
-    """
-    if current_user.id != user_id and not settings.is_admin_email(current_user.email):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only deactivate your own account"
-        )
-    
-    user = get_user_or_404(db, user_id)
-    
-    if user.status == UserStatus.INACTIVE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Account is already inactive"
-        )
-    
-    user.status = UserStatus.INACTIVE
-    user.user_status = False
-    
-    db.commit()
-    db.refresh(user)
-    
-    return {
-        "message": "Account deactivated successfully",
-        "user_id": user.id,
-        "status": user.status
-    }
 
 @router.get("/users/{user_id}", response_model=UserResponse)
 def get_user(
@@ -453,3 +476,67 @@ def get_profile(current_user: User = Depends(get_current_user)):
     """
     return current_user
 
+@router.patch("/users/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    background_tasks: BackgroundTasks,  
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update user information
+    Allows updating:
+    - Full name
+    - Email (will require re-verification if changed)
+    - Password
+    """
+    user_to_update = db.query(User).filter(User.id == user_id).first()
+    if not user_to_update:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    try:
+        is_admin(current_user)
+    except HTTPException:
+        if user_to_update.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only update your own profile"
+            )
+    
+    email_changed = False
+    verification_required = False
+    verification_token = None  
+
+    update_data = user_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == 'password' and value is not None:
+            user_to_update.hashed_password = hash_password(value)
+        elif field == 'email' and value is not None and value != user_to_update.email:
+            email_changed = True
+            user_to_update.email = value
+            user_to_update.email_verified = False
+            verification_token = email_service.generate_verification_token()
+            user_to_update.email_verification_token = verification_token
+            user_to_update.email_verification_expires = email_service.get_verification_expiry()
+            if user_to_update.status == UserStatus.ACTIVE:
+                user_to_update.status = UserStatus.PENDING
+            verification_required = True
+        elif field == 'full_name' and value is not None:
+            user_to_update.full_name = value
+    
+    db.commit()
+    db.refresh(user_to_update)
+
+    if email_changed and verification_required and verification_token:
+        email_service.send_verification_email(
+            background_tasks,
+            user_to_update.email,
+            user_to_update.full_name,
+            verification_token
+        )
+    
+    return user_to_update

@@ -29,5 +29,9 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
-
     todos = relationship("Todo", back_populates="owner")
+
+    def soft_delete(self):
+        self.deleted_at = func.now()
+        self.status = UserStatus.DELETED
+        self.user_status = False

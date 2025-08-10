@@ -1,32 +1,29 @@
 from fastapi import FastAPI
 from app.database.connection import create_tables
-from app.api.routes import auth, todos, admin  
+from app.api.routes import auth, todos  
 from app.config.settings import settings
-from app.config.scheduler import start_scheduler
-from apscheduler.schedulers.background import BackgroundScheduler
-import atexit
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create tables
 try:
     create_tables()
+    logger.info("Database tables created/verified successfully")
 except Exception as e:
-    print(f"Failed to create tables: {e}")
-
-# Start scheduler
-try:
-    start_scheduler()
-except Exception as e:
-    print(f"Failed to start scheduler: {e}")
+    logger.error(f"Failed to create tables: {e}")
+    raise
 
 # FastAPI application
 app = FastAPI(
-    title="Simple Todo API"
+    title="Todo API",
 )
 
 # Include routers
 app.include_router(auth.router)
 app.include_router(todos.router)
-app.include_router(admin.router) 
 
 @app.get("/")
 def read_root():
@@ -34,43 +31,45 @@ def read_root():
     Welcome message with API information
     """
     return {
-            "message": "Welcome to Simple Todo API",
-            "version": "1.1.0",
-            "features": ["User Authentication", "Password Validation", "Todo Management"],
-            "password_requirements": {
-                "minimum_length": 8,
-                "must_contain": [
-                    "At least one uppercase letter (A-Z)",
-                    "At least one lowercase letter (a-z)", 
-                    "At least one digit (0-9)",
-                    "At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
-                ]
+        "message": "Welcome to Todo API",
+        "version": "1.1.0",
+        "features": [
+            "User Authentication", 
+            "Password Validation", 
+            "Todo Management",
+            "Automatic User Cleanup"
+        ],
+        "password_requirements": {
+            "minimum_length": 8,
+            "must_contain": [
+                "At least one uppercase letter (A-Z)",
+                "At least one lowercase letter (a-z)", 
+                "At least one digit (0-9)",
+                "At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+            ]
+        },
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "endpoints": {
+            "auth": {
+                "register": "POST /auth/register",
+                "login": "POST /auth/login",
+                "logout": "POST /auth/logout"
             },
-            "docs": "/docs",
-            "redoc": "/redoc",
-            "endpoints": {
-                "auth": {
-                    "register": "POST /auth/register",
-                    "login": "POST /auth/login",
-                    "validate_password": "POST /auth/validate-password"
-                },
-                "todos": {
-                    "get_todos": "GET /todos",
-                    "create_todo": "POST /todos",
-                    "get_todo": "GET /todos/{id}",
-                    "update_todo": "PUT /todos/{id}",
-                    "delete_todo": "DELETE /todos/{id}"
-                }
+            "todos": {
+                "get_todos": "GET /todos",
+                "create_todo": "POST /todos",
+                "get_todo": "GET /todos/{id}",
+                "update_todo": "PUT /todos/{id}",
+                "delete_todo": "DELETE /todos/{id}"
+            },
+            "admin": {
+                "cleanup_users": "POST /admin/cleanup-deleted-users",
+                "scheduler_status": "GET /admin/scheduler-status"
             }
         }
+    }
 
-@app.on_event("shutdown")
-def shutdown_event():
-    """Clean up scheduler on shutdown"""
-    scheduler = BackgroundScheduler.get_instance()
-    if scheduler.running:
-        scheduler.shutdown()
-        print("Scheduler shut down successfully")
 
 # Run the application
 if __name__ == "__main__":
@@ -78,4 +77,5 @@ if __name__ == "__main__":
     print("Starting Todo API server with PostgreSQL...")
     print(f"Connecting to database at: {settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}")
     print("API Documentation will be available at: http://127.0.0.1:8000/docs")
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    print("Daily user cleanup scheduled for midnight (00:00)")
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)

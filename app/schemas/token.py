@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 
-class Token(BaseModel):
-    """Schema for JWT token response"""
+class AccessTokenResponse(BaseModel):
+    """Schema for access token"""
     access_token: str
-    refresh_token: str
     token_type: str
