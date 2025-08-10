@@ -540,3 +540,39 @@ def update_user(
         )
     
     return user_to_update
+
+@router.post("/users/{user_id}/restore", response_model=UserResponse)
+def restore_user(
+    user_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    admin_check: bool = Depends(is_admin) 
+):
+    """
+    Restore a soft-deleted user 
+    """
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.deleted_at.is_not(None)
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deleted user not found"
+        )
+
+    user.restore()
+    db.commit()
+    db.refresh(user)
+
+    if background_tasks:
+        email_service.send_status_change_email(
+            background_tasks,
+            user.email,
+            user.full_name,
+            f"Account Restored (Status: {user.status.value})"
+        )
+
+    return user

@@ -3,6 +3,11 @@ from app.database.connection import create_tables
 from app.api.routes import auth, todos  
 from app.config.settings import settings
 import logging
+from app.config.background import permanent_delete_expired_records
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
+from datetime import datetime
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +25,17 @@ except Exception as e:
 app = FastAPI(
     title="Todo API",
 )
+
+# Schedule the cleanup task to run daily
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    func=permanent_delete_expired_records,
+    trigger="interval",
+    days=1, 
+    next_run_time=datetime.now()  
+)
+scheduler.start()
+atexit.register(lambda: scheduler.shutdown())
 
 # Include routers
 app.include_router(auth.router)

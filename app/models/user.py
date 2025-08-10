@@ -35,3 +35,9 @@ class User(Base):
         self.deleted_at = func.now()
         self.status = UserStatus.DELETED
         self.user_status = False
+
+    def restore(self):
+        """Restore a soft-deleted user"""
+        self.deleted_at = None
+        self.status = UserStatus.ACTIVE 
+        self.user_status = True
